@@ -1,4 +1,8 @@
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
 from agent import run_agent
+
 
 def main():
     print("エージェント起動")

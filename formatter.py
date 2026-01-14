@@ -17,7 +17,7 @@ def format_weather(result: WeatherResult) -> str:
     ]
 
     res = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-4o-mini",
         messages=messages,
         temperature=0.3,
     )
