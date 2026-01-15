@@ -1,23 +1,23 @@
 from intent_parser import parse_weather_intent
-from weather_api import fetch_current_weather, fetch_forecast_weather
+from weather_api import fetch_weather
+from rules import decide_umbrella, decide_wind, decide_comfort
 from formatter import format_weather
-from openai import OpenAI
+from models import WeatherContext
 
-client = OpenAI()
 
 def run_agent(user_input: str) -> str:
     intent = parse_weather_intent(user_input)
+    if not intent:
+        return "天気に関する質問のみ対応しています。"
 
-    if intent:
-        if intent.days == 0:
-            result = fetch_current_weather(intent.city)
-        else:
-            result = fetch_forecast_weather(intent.city, intent.days)
-        return format_weather(result)
+    weather = fetch_weather(intent.city, intent.days)
 
-    # fallback
-    res = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": user_input}],
+    context = WeatherContext(
+        weather=weather,
+        umbrella=decide_umbrella(weather),
+        wind=decide_wind(weather),
+        comfort=decide_comfort(weather),
     )
-    return res.choices[0].message.content
+
+    return format_weather(context)
+    
