@@ -1,6 +1,9 @@
 import json
+from dataclasses import asdict
+
 from openai import OpenAI
 from models import WeatherContext
+from fallback_formatter import simple_format
 
 client = OpenAI()
 
@@ -12,30 +15,26 @@ def format_weather(context: WeatherContext) -> str:
     """
 
     system_prompt = (
-        "あなたは天気情報を分かり分かりやすく説明するアシスタントです。"
-        "与えられた情報をもとに、事実と判断結果をそのまま説明してください。"
+        "あなたは天気情報を分かりやすく説明するアシスタントです。"
+        "与えられた情報をそのまま説明してください。"
         "新しい判断や推測は行わないでください。"
     )
-
-    user_content = {
-        "weather": context.weather.__dict__,
-        "umbrella": context.umbrella.__dict__,
-        "wind": context.wind.__dict__,
-        "comfort": context.comfort.__dict__,
-    }
 
     messages = [
         {"role": "system", "content": system_prompt},
         {
             "role": "user",
-            "content": json.dumps(user_content, ensure_ascii=False),
-        }
+            "content": json.dumps(asdict(context), ensure_ascii=False),
+        },
     ]
 
-    res = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=messages,
-        temperature=0.3,
-    )
-
-    return res.choices[0].message.content
+    try:
+        res = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=messages,
+            temperature=0.3,
+        )
+        return res.choices[0].message.content
+    except Exception:
+        # LLM 障害時フォールバック
+        return simple_format(context)
