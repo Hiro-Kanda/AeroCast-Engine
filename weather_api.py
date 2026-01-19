@@ -1,45 +1,56 @@
 import os
 import requests
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
 from urllib.parse import quote
+
 from models import WeatherResult
+from error import CityNotFoundError, WeatherAPIError
 
 OPENWEATHER_KEY = os.getenv("OPENWEATHER_API_KEY")
+if not OPENWEATHER_KEY:
+    raise WeatherAPIError("OPENWEATHER_API_KEY が設定されていません")
 
-#======================================
+# 日本時間
+JST = timezone(timedelta(hours=9))
+
+# requests セッション（再利用）
+_SESSION = requests.Session()
+_TIMEOUT = 10
+
+# ======================================
 # Geo Coding
-#======================================
+# ======================================
 
 def resolve_city(city: str) -> tuple[float, float]:
-    # 都道府県名の「県」「府」「都」「道」を削除
     prefecture_suffixes = ["県", "府", "都", "道"]
     city_variants = [city]
-    
-    # 「県」「府」「都」「道」で終わる場合は削除したバージョンも試す
+
     for suffix in prefecture_suffixes:
         if city.endswith(suffix):
-            city_variants.append(city[:-1])  # 最後の1文字（県/府/都/道）を削除
+            city_variants.append(city[:-1])
             break
-    
-    # 各バリエーションで検索を試みる
+
     for city_variant in city_variants:
         encoded_city = quote(city_variant)
         url = (
             "https://api.openweathermap.org/geo/1.0/direct"
             f"?q={encoded_city},JP&limit=1&appid={OPENWEATHER_KEY}"
         )
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        try:
+            response = _SESSION.get(url, timeout=_TIMEOUT)
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException:
+            raise WeatherAPIError("地名解決APIへの接続に失敗しました")
+
         if data:
             return data[0]["lat"], data[0]["lon"]
-    
-    # すべて失敗した場合
-    raise RuntimeError(f"地名「{city}」を解決できません")
 
-#======================================
-# Current Weather API
-#======================================
+    raise CityNotFoundError(f"地名「{city}」を解決できませんでした")
+
+# ======================================
+# Current Weather
+# ======================================
 
 def fetch_current_weather(city: str, lat: float, lon: float) -> WeatherResult:
     url = (
@@ -48,9 +59,12 @@ def fetch_current_weather(city: str, lat: float, lon: float) -> WeatherResult:
         f"&appid={OPENWEATHER_KEY}&units=metric&lang=ja"
     )
 
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    data = response.json()
+    try:
+        response = _SESSION.get(url, timeout=_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException:
+        raise WeatherAPIError("現在の天気情報の取得に失敗しました")
 
     return WeatherResult(
         city=city,
@@ -63,117 +77,74 @@ def fetch_current_weather(city: str, lat: float, lon: float) -> WeatherResult:
         type="current",
     )
 
-# ===============================
-# Forecast (無料APIフォールバック)
-# ===============================
+# ======================================
+# Forecast Weather (無料API制約対応)
+# ======================================
 
-def _fetch_with_5day_api(city: str, lat: float, lon: float, days: int) -> WeatherResult:
-    """5 Day / 3 Hour Forecast APIを使用（無料プランで利用可能）"""
+def fetch_forecast_weather(
+    city: str,
+    lat: float,
+    lon: float,
+    days: int,
+) -> WeatherResult:
+    if not (0 <= days <= 5):
+        raise WeatherAPIError("無料APIでは0〜5日後まで取得可能です")
+
     url = (
         "https://api.openweathermap.org/data/2.5/forecast"
         f"?lat={lat}&lon={lon}&cnt=40"
         f"&appid={OPENWEATHER_KEY}&units=metric&lang=ja"
     )
-    
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    data = response.json()
-    
-    # 指定された日数の正午頃のデータを取得
-    target_date = datetime.now().date() + timedelta(days=days)
-    target_datetime = datetime.combine(target_date, time(hour=12))
-    
-    # 最も近い時刻のデータを探す
-    closest_forecast = None
-    min_diff = float('inf')
-    
-    for forecast in data["list"]:
-        forecast_time = datetime.fromtimestamp(forecast["dt"])
+
+    try:
+        response = _SESSION.get(url, timeout=_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException:
+        raise WeatherAPIError("予報データの取得に失敗しました")
+
+    if "list" not in data:
+        raise WeatherAPIError("予報データ形式が不正です")
+
+    now_jst = datetime.now(JST)
+    target_date = now_jst.date() + timedelta(days=days)
+    target_datetime = datetime.combine(
+        target_date,
+        time(hour=12),
+        tzinfo=JST,
+    )
+
+    closest = None
+    min_diff = float("inf")
+
+    for item in data["list"]:
+        forecast_time = datetime.fromtimestamp(
+            item["dt"],
+            tz=timezone.utc,
+        ).astimezone(JST)
+
         diff = abs((forecast_time - target_datetime).total_seconds())
         if diff < min_diff:
             min_diff = diff
-            closest_forecast = forecast
-    
-    if not closest_forecast:
-        raise RuntimeError(f"指定された日数（{days}日後）のデータが見つかりません")
-    
-    return WeatherResult(
-        city=city,
-        weather=closest_forecast["weather"][0]["description"],
-        temp=closest_forecast["main"]["temp"],
-        feels_like=closest_forecast["main"]["feels_like"],
-        humidity=closest_forecast["main"]["humidity"],
-        rain_probability=int(closest_forecast.get("pop", 0) * 100),
-        wind_speed=closest_forecast.get("wind", {}).get("speed", 0),
-        type="forecast",
-    )
+            closest = item
 
-
-def fetch_daily_weather(city: str, days: int) -> WeatherResult:
-    lat, lon = resolve_city(city)
-
-    url = (
-        "https://api.openweathermap.org/data/3.0/onecall"
-        f"?lat={lat}&lon={lon}&exclude=minutely,hourly,alerts"
-        f"&appid={OPENWEATHER_KEY}&units=metric&lang=ja"
-    )
-
-    response = requests.get(url, timeout=10)
-    
-    # 401エラーの場合、無料APIにフォールバック
-    if response.status_code == 401:
-        try:
-            return _fetch_with_5day_api(city, lat, lon, days)
-        except Exception as e:
-            error_data = response.json() if response.text else {}
-            error_message = error_data.get("message", "Unauthorized")
-            raise RuntimeError(
-                f"OpenWeatherMap API認証エラー (401): {error_message}\n\n"
-                "OpenWeatherMap API 3.0のOne Call APIを使用するには、"
-                "'One Call by Call'サブスクリプションを有効にする必要があります。\n"
-                "無料プランでも1,000コール/日まで利用可能です。\n\n"
-                "設定手順:\n"
-                "1. https://openweathermap.org/api/one-call-3 にアクセス\n"
-                "2. 'One Call by Call'サブスクリプションを有効化\n"
-                "3. APIキーが正しく設定されているか確認\n\n"
-                f"代替APIもエラー: {str(e)}"
-            )
-    
-    response.raise_for_status()
-    data = response.json()
-    
-    # APIエラーのチェック
-    if "cod" in data and data["cod"] != 200:
-        error_message = data.get("message", "不明なエラー")
-        raise RuntimeError(f"OpenWeatherMap APIエラー: {error_message}")
-    
-    # dailyキーの存在確認
-    if "daily" not in data:
-        error_message = data.get("message", "APIレスポンスに'daily'キーがありません")
-        raise RuntimeError(
-            f"OpenWeatherMap APIエラー: {error_message}\n"
-            "APIレスポンスの構造が期待と異なります。"
-        )
-    
-    if days >= len(data["daily"]):
-        raise RuntimeError(f"指定された日数（{days}日後）は利用できません。利用可能な日数: 0-{len(data['daily'])-1}")
-    
-    daily = data["daily"][days]
+    if not closest:
+        raise WeatherAPIError("指定日の予報が見つかりませんでした")
 
     return WeatherResult(
         city=city,
-        weather=daily["weather"][0]["description"],
-        temp=daily["temp"]["day"],
-        feels_like=daily["feels_like"]["day"],
-        humidity=daily["humidity"],
-        rain_probability=int(daily.get("pop", 0) * 100),
-        wind_speed=daily["wind_speed"],
+        weather=closest["weather"][0]["description"],
+        temp=closest["main"]["temp"],
+        feels_like=closest["main"]["feels_like"],
+        humidity=closest["main"]["humidity"],
+        rain_probability=int(closest.get("pop", 0) * 100),
+        wind_speed=closest.get("wind", {}).get("speed", 0),
         type="forecast",
     )
 
-# ===============================
-# ② 分岐用 統合関数
-# ===============================
+# ======================================
+# Unified Entry
+# ======================================
 
 def fetch_weather(city: str, days: int) -> WeatherResult:
     lat, lon = resolve_city(city)
@@ -181,4 +152,4 @@ def fetch_weather(city: str, days: int) -> WeatherResult:
     if days == 0:
         return fetch_current_weather(city, lat, lon)
 
-    return fetch_daily_weather(city, days)
+    return fetch_forecast_weather(city, lat, lon, days)

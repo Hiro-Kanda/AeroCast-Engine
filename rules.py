@@ -42,8 +42,7 @@ def decide_umbrella(weather: WeatherResult) -> UmbrellaDecision:
 
 def decide_wind(weather: WeatherResult) -> WindDecision:
     """
-
-    今日不注意が必要かを風速のみで判断する
+    風速のみで注意が必要かを判断する
     """
     ws = weather.wind_speed
     
