@@ -1,4 +1,4 @@
-from models import WeatherContext
+from .models import WeatherContext
 
 def simple_format(context: WeatherContext) -> str:
   w = context.weather

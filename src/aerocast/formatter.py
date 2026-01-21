@@ -2,8 +2,8 @@ import json
 from dataclasses import asdict
 
 from openai import OpenAI
-from models import WeatherContext
-from fallback_formatter import simple_format
+from .models import WeatherContext
+from .fallback_formatter import simple_format
 
 client = OpenAI()
 

@@ -3,8 +3,8 @@ import requests
 from datetime import datetime, timedelta, time, timezone
 from urllib.parse import quote
 
-from models import WeatherResult
-from error import CityNotFoundError, WeatherAPIError
+from .models import WeatherResult
+from .error import CityNotFoundError, WeatherAPIError
 
 OPENWEATHER_KEY = os.getenv("OPENWEATHER_API_KEY")
 if not OPENWEATHER_KEY:
