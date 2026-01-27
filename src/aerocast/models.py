@@ -13,9 +13,17 @@ class WeatherResult:
     temp: float
     feels_like: float
     humidity: int
+
     rain_probability: int # %
     wind_speed: float # m/s
-    type: Literal["current", "forecast"]
+
+    observed_at_jst: Optional[str] = None # "YYYY-mm-dd HH:MM"
+    source: Literal["openweather"] = "openweather"
+
+    snow_probability: Optional[int] = None # % (推定　or API由来)
+    snow_volume_mm_3h: Optional[float] = None #3時間の積雪量 (mm)
+
+    type: Literal["current", "forecast"] = "current"
     date: Optional[str] = None
 
 
