@@ -42,6 +42,10 @@ def format_weather(context: WeatherContext) -> str:
         validate_llm_output(output)
         return output
     except Exception as e:
-        # LLM 障害時フォールバック
-        logger.warning(f"LLM API呼び出しに失敗しました: {type(e).__name__}: {e}", exc_info=True)
+        # LLM 障害時フォールバック（エラーは内部ログのみに記録、ユーザーには表示しない）
+        logger.debug(
+            f"LLM API呼び出しに失敗しました: {type(e).__name__}: {e}",
+            exc_info=True
+        )
+        # フォールバックフォーマッターを使用（ユーザーにはエラーを表示しない）
         return simple_format(context)
