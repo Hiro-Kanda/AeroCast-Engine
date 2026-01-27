@@ -4,6 +4,7 @@ from .rules import decide_umbrella, decide_wind, decide_comfort
 from .formatter import format_weather
 from .models import WeatherContext
 from .error import UserFacingError
+from .logger import logger
 
 
 def run_agent(user_input: str) -> str:
@@ -15,7 +16,8 @@ def run_agent(user_input: str) -> str:
         weather = fetch_weather(intent.city, intent.days)
     except UserFacingError as e:
         return str(e)
-    except Exception:
+    except Exception as e:
+        logger.error(f"予期しないエラーが発生しました: {type(e).__name__}: {e}", exc_info=True)
         return "現行システムに問題が発生しています。"
 
     context = WeatherContext(
