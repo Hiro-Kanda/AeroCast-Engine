@@ -4,7 +4,7 @@ from aerocast.rules import (
     decide_wind,
     decide_comfort,
     RAIN_UMBRELLA_THRESHOLD,
-    WIND_ALEART_THRESHOLD,
+    WIND_ALERT_THRESHOLD,
 )
 from aerocast.models import WeatherResult
 
@@ -57,12 +57,12 @@ class TestDecideWind:
             feels_like=20.0,
             humidity=60,
             rain_probability=0,
-            wind_speed=WIND_ALEART_THRESHOLD,
+            wind_speed=WIND_ALERT_THRESHOLD,
             type="current",
         )
         decision = decide_wind(weather)
         assert decision.alert is True
-        assert decision.wind_speed == WIND_ALEART_THRESHOLD
+        assert decision.wind_speed == WIND_ALERT_THRESHOLD
         assert decision.reason_code == "WIND_GE_10"
 
     def test_wind_no_alert_low_speed(self):
@@ -74,7 +74,7 @@ class TestDecideWind:
             feels_like=20.0,
             humidity=60,
             rain_probability=0,
-            wind_speed=WIND_ALEART_THRESHOLD - 1,
+            wind_speed=WIND_ALERT_THRESHOLD - 1,
             type="current",
         )
         decision = decide_wind(weather)
