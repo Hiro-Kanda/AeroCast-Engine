@@ -94,6 +94,7 @@ def fetch_current_weather(city: str, lat: float, lon: float) -> WeatherResult:
         temp=data["main"]["temp"],
         feels_like=data["main"]["feels_like"],
         humidity=data["main"]["humidity"],
+        # 現在の天気APIにはpopフィールドがないため、0を設定（後でfetch_nowcast_probabilityで上書き）
         rain_probability=int(data.get("pop", 0) * 100),
         wind_speed=data.get("wind", {}).get("speed", 0),
         type="current",
@@ -201,7 +202,7 @@ def fetch_nowcast_probability(lat: float, lon: float) -> tuple[int, Optional[dic
     """forecastの直近枠から降水確率（pop）と、その枠データを返す"""
     url = (
         "https://api.openweathermap.org/data/2.5/forecast"
-        f"?lat={lat}&lon={lon}&cnt=2"
+        f"?lat={lat}&lon={lon}&cnt=40"
         f"&appid={OPENWEATHER_KEY}&units=metric&lang=ja"
     )
     try:
@@ -215,9 +216,29 @@ def fetch_nowcast_probability(lat: float, lon: float) -> tuple[int, Optional[dic
     if "list" not in data or not data["list"]:
         return 0, None
 
-    item = data["list"][0]
-    pop = int(item.get("pop", 0) * 100)
-    return pop, item
+    # 現在時刻に最も近い予報データを取得
+    now_jst = datetime.now(JST)
+    closest = None
+    min_diff = float("inf")
+
+    for item in data["list"]:
+        forecast_time = datetime.fromtimestamp(
+            item["dt"],
+            tz=timezone.utc,
+        ).astimezone(JST)
+        
+        # 過去のデータは除外し、現在時刻以降で最も近いものを選択
+        diff = (forecast_time - now_jst).total_seconds()
+        if diff >= 0 and diff < min_diff:
+            min_diff = diff
+            closest = item
+    
+    # 現在時刻以降のデータがない場合は、最初のアイテムを使用
+    if closest is None:
+        closest = data["list"][0]
+    
+    pop = int(closest.get("pop", 0) * 100)
+    return pop, closest
 
 
 def _enrich_snow_from_forecast_item(w: WeatherResult, item: Optional[dict]) -> None:
