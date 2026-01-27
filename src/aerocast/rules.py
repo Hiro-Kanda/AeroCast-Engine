@@ -10,7 +10,7 @@ from .models import (
 # ===============================
 
 RAIN_UMBRELLA_THRESHOLD = 40 # %
-WIND_ALEART_THRESHOLD = 10 # m/s
+WIND_ALERT_THRESHOLD = 10 # m/s
 
 # ===============================
 # Umbrella Decision
@@ -46,7 +46,7 @@ def decide_wind(weather: WeatherResult) -> WindDecision:
     """
     ws = weather.wind_speed
     
-    if ws >= WIND_ALEART_THRESHOLD:
+    if ws >= WIND_ALERT_THRESHOLD:
         return WindDecision(
             alert=True,
             wind_speed=ws,

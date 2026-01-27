@@ -100,7 +100,7 @@ def _extract_days(text: str) -> Optional[int]:
 # City Extraction
 # ===============================
 
-def _extract_city(text: str) -> str:
+def _extract_city(text: str) -> Optional[str]:
     city = text
 
     # 時間表現削除
@@ -119,4 +119,6 @@ def _extract_city(text: str) -> str:
     city = re.sub(r"[?？!！。、]", "", city)
     city = re.sub(r"\s+", "", city)
 
-    return city.strip()
+    city = city.strip()
+    # 空文字列の場合はNoneを返す
+    return city if city else None
