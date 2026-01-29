@@ -7,7 +7,7 @@ from .weather_api import fetch_weather
 from .rules import decide_umbrella, decide_wind, decide_comfort
 from .formatter import format_weather
 from .models import WeatherContext, WeatherResult
-from .error import UserFacingError, CityNotFoundError
+from .error import UserFacingError, CityNotFoundError, AmbiguousCityError
 from .session import get_session_context
 
 def next_action(s: AgentState) -> Action:
@@ -77,6 +77,8 @@ def run(user_input: str, session_id: str = "default", max_steps: int = 10) -> st
         # 都市名が曖昧な場合はCityNotFoundErrorに候補が含まれる
         weather = fetch_weather(s.city, s.days)
         s.weather = weather
+      except AmbiguousCityError as e:
+        return str(e)
       except CityNotFoundError as e:
         # 都市名が曖昧な場合、候補を提示
         return str(e)

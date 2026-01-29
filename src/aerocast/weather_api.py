@@ -5,14 +5,20 @@ from typing import Optional, List, Tuple
 from urllib.parse import quote
 
 from .models import WeatherResult
-from .error import CityNotFoundError, WeatherAPIError
+from .error import CityNotFoundError, WeatherAPIError, AmbiguousCityError
 from .logger import logger
 from .snow_estimator import estimate_snow_probability
 from .retry import exponential_backoff
 
-OPENWEATHER_KEY = os.getenv("OPENWEATHER_API_KEY")
-if not OPENWEATHER_KEY:
-    raise WeatherAPIError("OPENWEATHER_API_KEY が設定されていません")
+def _get_openweather_key() -> str:
+    """
+    APIキーは import 時ではなく、実際にAPIを叩く直前に検証する。
+    （pytest/静的解析/一部環境での import 失敗を防ぐ）
+    """
+    key = os.getenv("OPENWEATHER_API_KEY")
+    if not key:
+        raise WeatherAPIError("OPENWEATHER_API_KEY が設定されていません")
+    return key
 
 # 日本時間
 JST = timezone(timedelta(hours=9))
@@ -43,14 +49,27 @@ def _validate_weather_response(data: dict) -> None:
 @exponential_backoff(max_retries=3, base_delay=1.0)
 def _fetch_geo_data(city_variant: str, limit: int = 5) -> List[dict]:
     """地理情報を取得（リトライ機能付き）"""
+    key = _get_openweather_key()
     encoded_city = quote(city_variant)
     url = (
         "https://api.openweathermap.org/geo/1.0/direct"
-        f"?q={encoded_city},JP&limit={limit}&appid={OPENWEATHER_KEY}"
+        f"?q={encoded_city},JP&limit={limit}&appid={key}"
     )
     response = _SESSION.get(url, timeout=_TIMEOUT)
     response.raise_for_status()
     return response.json()
+
+
+def _format_geo_candidate(item: dict) -> str:
+    """geo/1.0/direct の候補表示用文字列を作る"""
+    name = item.get("name", "")
+    state = item.get("state")
+    country = item.get("country")
+    if state:
+        return f"{name}（{state}）"
+    if country:
+        return f"{name}（{country}）"
+    return name or "不明"
 
 
 def resolve_city_with_candidates(city: str, limit: int = 5) -> Tuple[Optional[tuple[float, float]], List[str]]:
@@ -77,18 +96,21 @@ def resolve_city_with_candidates(city: str, limit: int = 5) -> Tuple[Optional[tu
             data = _fetch_geo_data(city_variant, limit)
             
             if data:
-                # 最初の結果を返す
+                # 候補を整形して収集（重複排除）
+                candidates = []
+                for item in data:
+                    cand = _format_geo_candidate(item)
+                    if cand and cand not in candidates:
+                        candidates.append(cand)
+
+                # limit>1 で複数候補が返ってきた場合は「曖昧」とみなして座標を返さない
+                # → エージェントが候補提示・再問い合わせに分岐できるようにする
+                if limit > 1 and len(candidates) > 1:
+                    return None, candidates
+
+                # 単一候補（またはlimit==1）は先頭を採用
                 lat, lon = data[0]["lat"], data[0]["lon"]
-                city_name = data[0].get("name", city)
-                
-                # 複数の候補がある場合はリストに追加
-                if len(data) > 1:
-                    for item in data[1:]:
-                        candidate_name = item.get("name", "")
-                        if candidate_name and candidate_name not in all_candidates:
-                            all_candidates.append(candidate_name)
-                
-                return (lat, lon), all_candidates
+                return (lat, lon), []
             else:
                 # データがない場合は次のバリアントを試す
                 continue
@@ -115,10 +137,11 @@ def resolve_city(city: str) -> tuple[float, float]:
 
 @exponential_backoff(max_retries=3, base_delay=1.0)
 def fetch_current_weather(city: str, lat: float, lon: float) -> WeatherResult:
+    key = _get_openweather_key()
     url = (
         "https://api.openweathermap.org/data/2.5/weather"
         f"?lat={lat}&lon={lon}"
-        f"&appid={OPENWEATHER_KEY}&units=metric&lang=ja"
+        f"&appid={key}&units=metric&lang=ja"
     )
 
     try:
@@ -156,11 +179,12 @@ def fetch_forecast_weather(
 ) -> WeatherResult:
     if not (0 <= days <= 5):
         raise WeatherAPIError("無料APIでは0〜5日後まで取得可能です")
+    key = _get_openweather_key()
 
     url = (
         "https://api.openweathermap.org/data/2.5/forecast"
         f"?lat={lat}&lon={lon}&cnt=40"
-        f"&appid={OPENWEATHER_KEY}&units=metric&lang=ja"
+        f"&appid={key}&units=metric&lang=ja"
     )
 
     try:
@@ -231,11 +255,7 @@ def fetch_weather(city: str, days: int) -> WeatherResult:
     
     if coords is None:
         if candidates:
-            # 候補がある場合はCityNotFoundErrorに候補情報を含める
-            candidates_str = "、".join(candidates[:5])
-            raise CityNotFoundError(
-                f"地名「{city}」が曖昧です。どちらですか？\n候補: {candidates_str}"
-            )
+            raise AmbiguousCityError(city, candidates)
         else:
             raise CityNotFoundError(f"地名「{city}」を解決できませんでした")
     
@@ -263,10 +283,11 @@ def fetch_weather(city: str, days: int) -> WeatherResult:
 @exponential_backoff(max_retries=2, base_delay=0.5)
 def fetch_nowcast_probability(lat: float, lon: float) -> tuple[int, Optional[dict]]:
     """forecastの直近枠から降水確率（pop）と、その枠データを返す"""
+    key = _get_openweather_key()
     url = (
         "https://api.openweathermap.org/data/2.5/forecast"
         f"?lat={lat}&lon={lon}&cnt=40"
-        f"&appid={OPENWEATHER_KEY}&units=metric&lang=ja"
+        f"&appid={key}&units=metric&lang=ja"
     )
     try:
         response = _SESSION.get(url, timeout=_TIMEOUT)
