@@ -6,6 +6,7 @@ AeroCast Engine Package
 
 # メインのエージェント関数
 from .agent import run_agent
+from .agent_loop import run as run_agent_loop
 
 # データモデル
 from .models import (

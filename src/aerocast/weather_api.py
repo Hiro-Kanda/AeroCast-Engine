@@ -1,17 +1,24 @@
 import os
 import requests
 from datetime import datetime, timedelta, time, timezone
-from typing import Optional
+from typing import Optional, List, Tuple
 from urllib.parse import quote
 
 from .models import WeatherResult
-from .error import CityNotFoundError, WeatherAPIError
+from .error import CityNotFoundError, WeatherAPIError, AmbiguousCityError
 from .logger import logger
 from .snow_estimator import estimate_snow_probability
+from .retry import exponential_backoff
 
-OPENWEATHER_KEY = os.getenv("OPENWEATHER_API_KEY")
-if not OPENWEATHER_KEY:
-    raise WeatherAPIError("OPENWEATHER_API_KEY が設定されていません")
+def _get_openweather_key() -> str:
+    """
+    APIキーは import 時ではなく、実際にAPIを叩く直前に検証する。
+    （pytest/静的解析/一部環境での import 失敗を防ぐ）
+    """
+    key = os.getenv("OPENWEATHER_API_KEY")
+    if not key:
+        raise WeatherAPIError("OPENWEATHER_API_KEY が設定されていません")
+    return key
 
 # 日本時間
 JST = timezone(timedelta(hours=9))
@@ -39,7 +46,41 @@ def _validate_weather_response(data: dict) -> None:
 # Geo Coding
 # ======================================
 
-def resolve_city(city: str) -> tuple[float, float]:
+@exponential_backoff(max_retries=3, base_delay=1.0)
+def _fetch_geo_data(city_variant: str, limit: int = 5) -> List[dict]:
+    """地理情報を取得（リトライ機能付き）"""
+    key = _get_openweather_key()
+    encoded_city = quote(city_variant)
+    url = (
+        "https://api.openweathermap.org/geo/1.0/direct"
+        f"?q={encoded_city},JP&limit={limit}&appid={key}"
+    )
+    response = _SESSION.get(url, timeout=_TIMEOUT)
+    response.raise_for_status()
+    return response.json()
+
+
+def _format_geo_candidate(item: dict) -> str:
+    """geo/1.0/direct の候補表示用文字列を作る"""
+    name = item.get("name", "")
+    state = item.get("state")
+    country = item.get("country")
+    if state:
+        return f"{name}（{state}）"
+    if country:
+        return f"{name}（{country}）"
+    return name or "不明"
+
+
+def resolve_city_with_candidates(city: str, limit: int = 5) -> Tuple[Optional[tuple[float, float]], List[str]]:
+    """
+    都市名を解決し、候補も返す
+    
+    Returns:
+        (座標, 候補リスト) のタプル
+        座標が見つかった場合は (lat, lon) と空のリスト
+        候補がある場合は None と候補リスト
+    """
     prefecture_suffixes = ["県", "府", "都", "道"]
     city_variants = [city]
 
@@ -48,34 +89,59 @@ def resolve_city(city: str) -> tuple[float, float]:
             city_variants.append(city[:-1])
             break
 
+    all_candidates = []
+    
     for city_variant in city_variants:
-        encoded_city = quote(city_variant)
-        url = (
-            "https://api.openweathermap.org/geo/1.0/direct"
-            f"?q={encoded_city},JP&limit=1&appid={OPENWEATHER_KEY}"
-        )
         try:
-            response = _SESSION.get(url, timeout=_TIMEOUT)
-            response.raise_for_status()
-            data = response.json()
+            data = _fetch_geo_data(city_variant, limit)
+            
+            if data:
+                # 候補を整形して収集（重複排除）
+                candidates = []
+                for item in data:
+                    cand = _format_geo_candidate(item)
+                    if cand and cand not in candidates:
+                        candidates.append(cand)
+
+                # limit>1 で複数候補が返ってきた場合は「曖昧」とみなして座標を返さない
+                # → エージェントが候補提示・再問い合わせに分岐できるようにする
+                if limit > 1 and len(candidates) > 1:
+                    return None, candidates
+
+                # 単一候補（またはlimit==1）は先頭を採用
+                lat, lon = data[0]["lat"], data[0]["lon"]
+                return (lat, lon), []
+            else:
+                # データがない場合は次のバリアントを試す
+                continue
+                
         except requests.RequestException as e:
             logger.error(f"地名解決APIへの接続に失敗しました: {e}", exc_info=True)
-            raise WeatherAPIError("地名解決APIへの接続に失敗しました")
+            # 次のバリアントを試す
+            continue
 
-        if data:
-            return data[0]["lat"], data[0]["lon"]
+    # 見つからなかった場合
+    return None, all_candidates
 
-    raise CityNotFoundError(f"地名「{city}」を解決できませんでした")
+
+def resolve_city(city: str) -> tuple[float, float]:
+    """都市名を解決（後方互換性のため）"""
+    coords, _ = resolve_city_with_candidates(city, limit=1)
+    if coords is None:
+        raise CityNotFoundError(f"地名「{city}」を解決できませんでした")
+    return coords
 
 # ======================================
 # Current Weather
 # ======================================
 
+@exponential_backoff(max_retries=3, base_delay=1.0)
 def fetch_current_weather(city: str, lat: float, lon: float) -> WeatherResult:
+    key = _get_openweather_key()
     url = (
         "https://api.openweathermap.org/data/2.5/weather"
         f"?lat={lat}&lon={lon}"
-        f"&appid={OPENWEATHER_KEY}&units=metric&lang=ja"
+        f"&appid={key}&units=metric&lang=ja"
     )
 
     try:
@@ -94,6 +160,7 @@ def fetch_current_weather(city: str, lat: float, lon: float) -> WeatherResult:
         temp=data["main"]["temp"],
         feels_like=data["main"]["feels_like"],
         humidity=data["main"]["humidity"],
+        # 現在の天気APIにはpopフィールドがないため、0を設定（後でfetch_nowcast_probabilityで上書き）
         rain_probability=int(data.get("pop", 0) * 100),
         wind_speed=data.get("wind", {}).get("speed", 0),
         type="current",
@@ -103,6 +170,7 @@ def fetch_current_weather(city: str, lat: float, lon: float) -> WeatherResult:
 # Forecast Weather (無料API制約対応)
 # ======================================
 
+@exponential_backoff(max_retries=3, base_delay=1.0)
 def fetch_forecast_weather(
     city: str,
     lat: float,
@@ -111,11 +179,12 @@ def fetch_forecast_weather(
 ) -> WeatherResult:
     if not (0 <= days <= 5):
         raise WeatherAPIError("無料APIでは0〜5日後まで取得可能です")
+    key = _get_openweather_key()
 
     url = (
         "https://api.openweathermap.org/data/2.5/forecast"
         f"?lat={lat}&lon={lon}&cnt=40"
-        f"&appid={OPENWEATHER_KEY}&units=metric&lang=ja"
+        f"&appid={key}&units=metric&lang=ja"
     )
 
     try:
@@ -176,7 +245,21 @@ def fetch_forecast_weather(
 # ======================================
 
 def fetch_weather(city: str, days: int) -> WeatherResult:
-    lat, lon = resolve_city(city)
+    """
+    天気情報を取得（都市名の解決と候補の取得も行う）
+    
+    都市名が曖昧な場合は候補を返すために例外を投げる可能性がある
+    """
+    # まず候補を取得してみる
+    coords, candidates = resolve_city_with_candidates(city, limit=5)
+    
+    if coords is None:
+        if candidates:
+            raise AmbiguousCityError(city, candidates)
+        else:
+            raise CityNotFoundError(f"地名「{city}」を解決できませんでした")
+    
+    lat, lon = coords
 
     if days == 0:
         current = fetch_current_weather(city, lat, lon)
@@ -197,12 +280,14 @@ def fetch_weather(city: str, days: int) -> WeatherResult:
     return forecast
 
 
+@exponential_backoff(max_retries=2, base_delay=0.5)
 def fetch_nowcast_probability(lat: float, lon: float) -> tuple[int, Optional[dict]]:
     """forecastの直近枠から降水確率（pop）と、その枠データを返す"""
+    key = _get_openweather_key()
     url = (
         "https://api.openweathermap.org/data/2.5/forecast"
-        f"?lat={lat}&lon={lon}&cnt=2"
-        f"&appid={OPENWEATHER_KEY}&units=metric&lang=ja"
+        f"?lat={lat}&lon={lon}&cnt=40"
+        f"&appid={key}&units=metric&lang=ja"
     )
     try:
         response = _SESSION.get(url, timeout=_TIMEOUT)
@@ -215,9 +300,29 @@ def fetch_nowcast_probability(lat: float, lon: float) -> tuple[int, Optional[dic
     if "list" not in data or not data["list"]:
         return 0, None
 
-    item = data["list"][0]
-    pop = int(item.get("pop", 0) * 100)
-    return pop, item
+    # 現在時刻に最も近い予報データを取得
+    now_jst = datetime.now(JST)
+    closest = None
+    min_diff = float("inf")
+
+    for item in data["list"]:
+        forecast_time = datetime.fromtimestamp(
+            item["dt"],
+            tz=timezone.utc,
+        ).astimezone(JST)
+        
+        # 過去のデータは除外し、現在時刻以降で最も近いものを選択
+        diff = (forecast_time - now_jst).total_seconds()
+        if diff >= 0 and diff < min_diff:
+            min_diff = diff
+            closest = item
+    
+    # 現在時刻以降のデータがない場合は、最初のアイテムを使用
+    if closest is None:
+        closest = data["list"][0]
+    
+    pop = int(closest.get("pop", 0) * 100)
+    return pop, closest
 
 
 def _enrich_snow_from_forecast_item(w: WeatherResult, item: Optional[dict]) -> None:

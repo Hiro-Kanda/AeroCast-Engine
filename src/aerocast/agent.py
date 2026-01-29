@@ -1,3 +1,4 @@
+from .agent_loop import run as run_agent_loop
 from .intent_parser import parse_weather_intent
 from .weather_api import fetch_weather
 from .rules import decide_umbrella, decide_wind, decide_comfort
@@ -7,25 +8,17 @@ from .error import UserFacingError
 from .logger import logger
 
 
-def run_agent(user_input: str) -> str:
-    intent = parse_weather_intent(user_input)
-    if not intent:
-        return "天気に関する質問のみ対応しています。"
-
-    try:
-        weather = fetch_weather(intent.city, intent.days)
-    except UserFacingError as e:
-        return str(e)
-    except Exception as e:
-        logger.error(f"予期しないエラーが発生しました: {type(e).__name__}: {e}", exc_info=True)
-        return "現行システムに問題が発生しています。"
-
-    context = WeatherContext(
-        weather=weather,
-        umbrella=decide_umbrella(weather),
-        wind=decide_wind(weather),
-        comfort=decide_comfort(weather),
-    )
-
-    return format_weather(context)
+def run_agent(user_input: str, session_id: str = "default") -> str:
+    """
+    エージェントを実行（後方互換性のため）
+    
+    Args:
+        user_input: ユーザー入力
+        session_id: セッションID（会話の文脈を保持するため）
+    
+    Returns:
+        天気情報の説明文
+    """
+    # 新しいエージェントループを使用
+    return run_agent_loop(user_input, session_id=session_id)
     

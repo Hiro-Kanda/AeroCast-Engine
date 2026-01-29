@@ -7,7 +7,14 @@ from .fallback_formatter import simple_format
 from .logger import logger
 from .validators import validate_llm_output
 
-client = OpenAI()
+_client = None
+
+def _get_client() -> OpenAI:
+    """APIを叩く直前にクライアントを取得（import時にAPIキーを要求しない）"""
+    global _client
+    if _client is None:
+        _client = OpenAI()
+    return _client
 
 def format_weather(context: WeatherContext) -> str:
     """
@@ -32,6 +39,7 @@ def format_weather(context: WeatherContext) -> str:
     ]
 
     try:
+        client = _get_client()
         res = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
