@@ -9,6 +9,7 @@ from .formatter import format_weather
 from .models import WeatherContext, WeatherResult
 from .error import UserFacingError, CityNotFoundError, AmbiguousCityError
 from .session import get_session_context
+from .preprocessor import normalize_user_input
 
 def next_action(s: AgentState) -> Action:
   if s.intent is None or s.days is None:
@@ -34,8 +35,10 @@ def run(user_input: str, session_id: str = "default", max_steps: int = 10) -> st
   """
   # セッションから文脈を取得
   context = get_session_context(session_id)
-  
-  s = AgentState(user_input=user_input)
+
+  # 誤字・脱字の補正（教えてく→教えてください など）
+  normalized_input = normalize_user_input(user_input)
+  s = AgentState(user_input=normalized_input)
 
   for _ in range(max_steps):
     a = next_action(s)
