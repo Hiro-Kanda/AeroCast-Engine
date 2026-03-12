@@ -6,7 +6,7 @@ AeroCast Engine Package
 
 # メインのエージェント関数
 from .agent import run_agent
-from .agent_loop import run as run_agent_loop
+from .agent_loop import run as run_agent_loop, run_structured, RunResult
 
 # データモデル
 from .models import (
@@ -28,6 +28,8 @@ from .error import (
 __all__ = [
     # メイン関数
     "run_agent",
+    "run_structured",
+    "RunResult",
     # データモデル
     "WeatherContext",
     "WeatherResult",
