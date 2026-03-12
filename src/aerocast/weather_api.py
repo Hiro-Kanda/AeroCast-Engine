@@ -250,15 +250,15 @@ def fetch_weather(city: str, days: int) -> WeatherResult:
     
     都市名が曖昧な場合は候補を返すために例外を投げる可能性がある
     """
-    # まず候補を取得してみる
     coords, candidates = resolve_city_with_candidates(city, limit=5)
-    
+
+    # 候補が1件でもあれば勝手に確定せず、ユーザーに聞き返す（候補提示を確実に発火）
+    if candidates:
+        raise AmbiguousCityError(city, candidates)
+
     if coords is None:
-        if candidates:
-            raise AmbiguousCityError(city, candidates)
-        else:
-            raise CityNotFoundError(f"地名「{city}」を解決できませんでした")
-    
+        raise CityNotFoundError(f"地名「{city}」を解決できませんでした")
+
     lat, lon = coords
 
     if days == 0:
