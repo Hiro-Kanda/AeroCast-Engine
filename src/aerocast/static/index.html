@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AeroCast チャット</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="weather-effect" aria-hidden="true">
+    <div class="weather-layer rain-layer"></div>
+    <div class="weather-layer snow-layer"></div>
+    <div class="weather-layer lightning-layer"></div>
+    <div class="weather-layer wind-layer"></div>
+    <div class="weather-layer cloud-layer"></div>
+  </div>
+  <div class="container">
+    <header class="chat-header">
+      <h1>AeroCast-Engine</h1>
+      <p class="subtitle">天気について聞いてください</p>
+    </header>
+
+    <div class="messages" id="messages" role="log"></div>
+
+    <div class="input-area">
+      <div class="input-bar">
+        <textarea
+          id="input"
+          class="chat-input"
+          placeholder="質問してみましょう"
+          rows="1"
+          aria-label="チャット入力"
+        ></textarea>
+        <button type="button" class="input-bar-icon" aria-label="音声入力" title="音声入力">
+          <svg class="icon-mic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5 3v1c0 2.76-2.24 5-5 5s-5-2.24-5-5v-1h2v1c0 1.66 1.34 3 3 3s3-1.34 3-3v-1h2z"/></svg>
+        </button>
+        <button type="button" class="input-bar-send" id="send-btn" aria-label="送信" title="送信">
+          <svg class="icon-send" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var sessionId = typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : "session-" + Date.now();
+
+      var messagesEl = document.getElementById("messages");
+      var inputEl = document.getElementById("input");
+
+      var container = document.querySelector(".container");
+      function appendMessage(className, text) {
+        var div = document.createElement("div");
+        div.className = "message " + className;
+        div.textContent = text;
+        messagesEl.appendChild(div);
+        if (container && !container.classList.contains("has-messages")) {
+          container.classList.add("has-messages");
+        }
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return div;
+      }
+
+      var sendBtn = document.getElementById("send-btn");
+      function setLoading(show) {
+        inputEl.disabled = show;
+        sendBtn.disabled = show;
+        if (show) {
+          var el = document.createElement("div");
+          el.className = "message loading";
+          el.textContent = "応答を待っています";
+          el.id = "loading-msg";
+          messagesEl.appendChild(el);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        } else {
+          var loading = document.getElementById("loading-msg");
+          if (loading) loading.remove();
+        }
+      }
+
+      function getApiBase() {
+        return window.location.origin;
+      }
+
+      function getWeatherCategoryFromForecast(forecast) {
+        if (!forecast) return null;
+        var w = String(forecast.weather || "").toLowerCase();
+        if (!w) return null;
+        if (/晴|clear|few|scattered|broken/.test(w)) return "sunny";
+        if (/雪|snow/.test(w)) return "snowy";
+        if (/雷|thunder/.test(w)) return "storm";
+        if (/雨|rain|drizzle|shower/.test(w)) return "rainy";
+        if (/曇|くもり|雲|cloud|overcast|mist|fog/.test(w)) return "cloudy";
+        return null;
+      }
+
+      function getWeatherCategoryFromReply(reply) {
+        if (!reply) return null;
+        var r = String(reply);
+        if (/晴|clear/.test(r)) return "sunny";
+        if (/雪|snow/.test(r)) return "snowy";
+        if (/雷|thunder/.test(r)) return "storm";
+        if (/雨|rain/.test(r)) return "rainy";
+        if (/曇|くもり|雲|cloud/.test(r)) return "cloudy";
+        return null;
+      }
+
+      function isStrongWind(data) {
+        var j = data && data.judgement;
+        if (!j || !j.wind) return false;
+        return j.wind.alert === true || (typeof j.wind.wind_speed === "number" && j.wind.wind_speed >= 10);
+      }
+
+      function applyWeatherBackground(data) {
+        var category = getWeatherCategoryFromForecast(data && data.forecast) ||
+          getWeatherCategoryFromReply(data && data.reply) ||
+          "default";
+        document.body.setAttribute("data-weather", category);
+        document.body.setAttribute("data-wind", isStrongWind(data) ? "strong" : "");
+      }
+
+      function sendMessage() {
+        var text = inputEl.value.trim();
+        if (!text) return;
+
+        appendMessage("user", text);
+        inputEl.value = "";
+        inputEl.style.height = "auto";
+
+        setLoading(true);
+
+        fetch(getApiBase() + "/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, message: text })
+        })
+          .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.detail || res.statusText); });
+            return res.json();
+          })
+          .then(function (data) {
+            appendMessage("assistant", data.reply || "（返答がありません）");
+            applyWeatherBackground(data);
+          })
+          .catch(function (err) {
+            appendMessage("error", "エラー: " + (err.message || String(err)));
+          })
+          .finally(function () {
+            setLoading(false);
+          });
+      }
+
+      sendBtn.addEventListener("click", sendMessage);
+
+      // テキストエリアの自動リサイズ
+      inputEl.addEventListener("input", function () {
+        inputEl.style.height = "auto";
+        inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + "px";
+      });
+    })();
+  </script>
+</body>
+</html>
