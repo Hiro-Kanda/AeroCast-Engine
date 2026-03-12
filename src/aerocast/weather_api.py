@@ -72,6 +72,35 @@ def _format_geo_candidate(item: dict) -> str:
     return name or "不明"
 
 
+# 複数候補が返っても「先頭を採用してよい」代表的な都市名（都道府県・主要都市）
+# OpenWeatherMap が複数件返す場合でも、ユーザーが意図するのは通常この1件
+WELL_KNOWN_CITY_NAMES = frozenset({
+    "東京", "大阪", "名古屋", "横浜", "福岡", "札幌", "京都", "神戸", "川崎", "さいたま",
+    "広島", "仙台", "北九州", "熊本", "岡山", "静岡", "新潟", "長崎", "岐阜", "奈良", "長野",
+    "千葉", "堺", "富山", "金沢", "高松", "松山", "那覇", "宇都宮", "前橋", "水戸", "盛岡",
+    "秋田", "山形", "福島", "郡山", "いわき", "青森", "弘前", "函館", "小樽", "旭川", "帯広",
+    "釧路", "室蘭", "苫小牧", "江別", "北広島", "石巻", "気仙沼", "多賀城", "岩沼", "登米",
+    "大崎", "古川", "角田", "白石", "柴田", "伊達", "仙台", "山形", "米沢", "鶴岡", "酒田",
+    "新庄", "寒河江", "上山市", "天童", "東根", "尾花沢", "南陽", "長井", "福島", "いわき",
+    "郡山", "会津若松", "白河", "須賀川", "二本松", "田村", "南相馬", "本宮", "喜多方",
+})
+
+
+def _first_result_matches_query(city_variant: str, first_item: dict) -> bool:
+    """先頭候補がユーザー入力と同一の場所を指すとみなせるか"""
+    name = (first_item.get("name") or "").strip()
+    local_names = first_item.get("local_names") or {}
+    local_ja = (local_names.get("ja") or "").strip()
+    q = (city_variant or "").strip()
+    if not q:
+        return False
+    if name == q or local_ja == q:
+        return True
+    if q in WELL_KNOWN_CITY_NAMES:
+        return True
+    return False
+
+
 def resolve_city_with_candidates(city: str, limit: int = 5) -> Tuple[Optional[tuple[float, float]], List[str]]:
     """
     都市名を解決し、候補も返す
@@ -103,9 +132,12 @@ def resolve_city_with_candidates(city: str, limit: int = 5) -> Tuple[Optional[tu
                     if cand and cand not in candidates:
                         candidates.append(cand)
 
-                # limit>1 で複数候補が返ってきた場合は「曖昧」とみなして座標を返さない
-                # → エージェントが候補提示・再問い合わせに分岐できるようにする
+                # 複数候補が返った場合：先頭がユーザー入力と一致するなら先頭を採用（東京・大阪などで正しく解釈）
+                # 一致しない場合のみ「曖昧」として候補を返す
                 if limit > 1 and len(candidates) > 1:
+                    if _first_result_matches_query(city_variant, data[0]):
+                        lat, lon = data[0]["lat"], data[0]["lon"]
+                        return (lat, lon), []
                     return None, candidates
 
                 # 単一候補（またはlimit==1）は先頭を採用
