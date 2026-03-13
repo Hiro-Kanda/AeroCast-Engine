@@ -82,8 +82,6 @@ def parse_weather_intent(
             days = context_days
         else:
             days = 0  # デフォルトは今日
-    elif not (0 <= days <= 5):
-        return None
 
     # --- 都市名抽出 ---
     city = _extract_city(text)
