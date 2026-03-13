@@ -24,6 +24,24 @@ body[data-weather="sunny"] {
     linear-gradient(180deg, #2b5fa0 0%, #5f98de 42%, #8fd8ff 100%);
 }
 
+body[data-weather="sunny"][data-time="morning"] {
+  background:
+    radial-gradient(circle at 76% 14%, rgba(255, 238, 196, 0.3) 0%, rgba(255, 238, 196, 0.1) 18%, transparent 36%),
+    linear-gradient(180deg, #49689b 0%, #7ba6dd 44%, #b8e0ff 100%);
+}
+
+body[data-weather="sunny"][data-time="evening"] {
+  background:
+    radial-gradient(circle at 78% 16%, rgba(255, 210, 150, 0.34) 0%, rgba(255, 210, 150, 0.1) 18%, transparent 38%),
+    linear-gradient(180deg, #44527f 0%, #b06d58 42%, #f2b37f 100%);
+}
+
+body[data-weather="sunny"][data-time="night"] {
+  background:
+    radial-gradient(circle at 80% 14%, rgba(203, 213, 225, 0.12) 0%, rgba(203, 213, 225, 0.03) 14%, transparent 28%),
+    linear-gradient(180deg, #07111f 0%, #15304f 48%, #27496f 100%);
+}
+
 /* 晴れのとき：光が差し込む表現 */
 body[data-weather="sunny"]::before {
   content: "";
@@ -111,6 +129,42 @@ body[data-weather="default"] {
   pointer-events: none;
   z-index: 0.5;
   overflow: hidden;
+}
+
+.weather-effect::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.8s ease, background 0.8s ease;
+}
+
+body[data-time="morning"] .weather-effect::before {
+  opacity: 1;
+  background:
+    linear-gradient(180deg, rgba(255, 236, 179, 0.18) 0%, rgba(255, 244, 214, 0.08) 26%, transparent 60%),
+    radial-gradient(circle at 18% 18%, rgba(255, 244, 214, 0.2) 0%, rgba(255, 244, 214, 0.06) 22%, transparent 40%);
+}
+
+body[data-time="day"] .weather-effect::before {
+  opacity: 0.7;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.012) 22%, transparent 56%);
+}
+
+body[data-time="evening"] .weather-effect::before {
+  opacity: 1;
+  background:
+    linear-gradient(180deg, rgba(255, 196, 128, 0.28) 0%, rgba(255, 168, 120, 0.14) 26%, rgba(61, 36, 44, 0.14) 72%, transparent 100%),
+    radial-gradient(circle at 76% 20%, rgba(255, 214, 170, 0.24) 0%, rgba(255, 214, 170, 0.07) 20%, transparent 38%);
+}
+
+body[data-time="night"] .weather-effect::before {
+  opacity: 1;
+  background:
+    linear-gradient(180deg, rgba(5, 10, 26, 0.4) 0%, rgba(10, 18, 38, 0.26) 38%, rgba(5, 10, 26, 0.2) 100%),
+    radial-gradient(circle at 78% 14%, rgba(148, 163, 184, 0.12) 0%, rgba(148, 163, 184, 0.03) 16%, transparent 30%);
 }
 
 .weather-effect .weather-layer {

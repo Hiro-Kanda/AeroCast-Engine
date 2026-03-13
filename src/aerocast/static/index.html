@@ -95,6 +95,18 @@
         return window.location.origin;
       }
 
+      function getTimeCategory(date) {
+        var hour = (date || new Date()).getHours();
+        if (hour >= 5 && hour < 10) return "morning";
+        if (hour >= 10 && hour < 16) return "day";
+        if (hour >= 16 && hour < 19) return "evening";
+        return "night";
+      }
+
+      function applyTimeBackground() {
+        document.body.setAttribute("data-time", getTimeCategory(new Date()));
+      }
+
       function getWeatherCategoryFromForecast(forecast) {
         if (!forecast) return null;
         var w = String(forecast.weather || "").toLowerCase();
@@ -130,6 +142,7 @@
           "default";
         document.body.setAttribute("data-weather", category);
         document.body.setAttribute("data-wind", isStrongWind(data) ? "strong" : "");
+        applyTimeBackground();
       }
 
       function sendMessage() {
@@ -164,6 +177,8 @@
       }
 
       sendBtn.addEventListener("click", sendMessage);
+      applyTimeBackground();
+      window.setInterval(applyTimeBackground, 60000);
 
       // テキストエリアの自動リサイズ
       inputEl.addEventListener("input", function () {
