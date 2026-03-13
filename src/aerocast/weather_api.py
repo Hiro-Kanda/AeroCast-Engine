@@ -238,6 +238,8 @@ def fetch_forecast_weather(
         tzinfo=JST,
     )
 
+    same_day_items = []
+
     closest = None
     min_diff = float("inf")
 
@@ -246,6 +248,9 @@ def fetch_forecast_weather(
             item["dt"],
             tz=timezone.utc,
         ).astimezone(JST)
+        if forecast_time.date() != target_date:
+            continue
+        same_day_items.append((forecast_time, item))
 
         diff = abs((forecast_time - target_datetime).total_seconds())
         if diff < min_diff:
