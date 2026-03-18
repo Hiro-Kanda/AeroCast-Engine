@@ -68,3 +68,29 @@ class WeatherContext:
     umbrella: UmbrellaDecision
     wind: WindDecision
     comfort: ComfortDecision
+
+
+# ===============================
+# Summary & Advice (表示向けパイプライン)
+# ===============================
+
+@dataclass
+class WeatherSummary:
+    """APIレスポンスを表示向けに要約した結果"""
+    city: str
+    condition_text: str
+    temp_max: float
+    temp_min: float
+    precipitation_summary: str
+    date_label: str
+    observed_at_jst: Optional[str] = None
+
+
+@dataclass
+class AdviceResult:
+    """生活アドバイス生成結果"""
+    clothing: str
+    umbrella: str
+    wind: str
+    feels_like_comment: str
+    seasonal_comment: str
